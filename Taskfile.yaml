@@ -1,0 +1,33 @@
+version: 3
+
+tasks:
+  default:
+    cmds:
+      - task: test
+
+  test:
+    cmds:
+      - task: test-http-client
+    aliases:
+      - t
+    method: none
+    silent: true
+
+  test-http-client:
+    cmds:
+      - odin test http-client
+    sources:
+      - ./http-client/**/*.odin
+    aliases:
+      - thc
+    method: none
+    silent: true
+
+  clean:
+    cmds:
+      - rm -rf ./bin
+    aliases:
+      - c
+    silent: true
+
+interval: 250ms
