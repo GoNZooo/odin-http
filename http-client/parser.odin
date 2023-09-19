@@ -62,9 +62,6 @@ parse_headers :: proc(
 
 		done_reading_header_value := false
 		for !done_reading_header_value {
-			// TODO(rickard): Here we want to read a string until we hit CRLF, but if we read whitespace
-			// immediately after the CRLF we should add the content following that whitespace to the
-			// header value
 			value_string, read_until_error := tokenizer_read_string_until(
 				&tokenizer,
 				[]string{"\r\n"},
