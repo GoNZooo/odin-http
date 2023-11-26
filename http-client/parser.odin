@@ -2,11 +2,13 @@ package http_client
 
 import "core:fmt"
 import "core:log"
+import "core:mem"
 import "core:runtime"
+import "core:strconv"
 import "core:strings"
 import "core:testing"
 
-// NOTE(gonz): Making the assumption that 32 kB for headers "is enough for everyone" for now
+// NOTE(gonz): Making the assumption that 32 kB for headers "ough to be enough for anybody" for now
 
 MAX_HEADERS_LENGTH :: 32 * 1024
 
@@ -28,6 +30,127 @@ ExpectedHeaderNameToEnd :: struct {
 ExpectedHeaderValueToEnd :: struct {
 	name: string,
 	data: string,
+}
+
+ParseRequestError :: union {
+	mem.Allocator_Error,
+	ExpectationError,
+	ResponseLineParsingError,
+	HeaderParsingError,
+}
+
+ParseResponseError :: union {
+	mem.Allocator_Error,
+	ExpectationError,
+	ResponseLineParsingError,
+	HeaderParsingError,
+}
+
+ResponseLineParsingError :: union {
+	InvalidProtocol,
+	InvalidStatus,
+}
+
+InvalidProtocol :: struct {
+	protocol: string,
+}
+
+InvalidStatus :: struct {
+	status: string,
+}
+
+Request :: struct {
+	method:   Method,
+	path:     string,
+	protocol: string,
+	headers:  map[string]string,
+}
+
+Response :: struct {
+	protocol: string,
+	status:   int,
+	message:  string,
+	headers:  map[string]string,
+	body:     []byte,
+}
+
+Method :: union {
+	GET,
+	POST,
+}
+
+GET :: struct {}
+POST :: struct {
+	data: []byte,
+}
+
+parse_request :: proc(
+	data: []byte,
+	allocator := context.allocator,
+) -> (
+	m: Request,
+	error: ParseRequestError,
+) {
+	data_string := strings.clone_from_bytes(data, allocator) or_return
+	tokenizer := tokenizer_create(data_string)
+	t := tokenizer_expect(&tokenizer, UpperSymbol{}) or_return
+	if t.token.(UpperSymbol).value != "GET" {
+		error = ExpectationError(
+			ExpectedToken{
+				expected = UpperSymbol{value = "GET"},
+				actual = t.token,
+				location = t.location,
+			},
+		)
+
+		return Request{}, error
+	}
+
+	tokenizer_skip_any_of(&tokenizer, {Space{}})
+
+	m.method = GET{}
+	m.path = tokenizer_read_string_until(&tokenizer, []string{" "}) or_return
+	m.protocol = tokenizer_read_string_until(&tokenizer, []string{"\r\n"}) or_return
+	m.headers = parse_headers(tokenizer.source[tokenizer.position:], allocator) or_return
+
+	return m, nil
+}
+
+parse_response :: proc(
+	data: []byte,
+	allocator := context.allocator,
+) -> (
+	m: Response,
+	error: ParseResponseError,
+) {
+	data_string := strings.clone_from_bytes(data, allocator) or_return
+	tokenizer := tokenizer_create(data_string)
+	t := tokenizer_expect(&tokenizer, UpperSymbol{}) or_return
+	if t.token.(UpperSymbol).value != "GET" {
+		error = ExpectationError(
+			ExpectedToken{
+				expected = UpperSymbol{value = "GET"},
+				actual = t.token,
+				location = t.location,
+			},
+		)
+
+		return Response{}, error
+	}
+
+	tokenizer_skip_any_of(&tokenizer, {Space{}})
+
+	m.protocol = tokenizer_read_string_until(&tokenizer, []string{" "}) or_return
+	status_string := tokenizer_read_string_until(&tokenizer, []string{" "}) or_return
+	status, parse_ok := strconv.parse_int(status_string, 10)
+	if !parse_ok {
+		return Response{}, ResponseLineParsingError(InvalidStatus{status = status_string})
+	}
+	m.status = status
+	m.message = tokenizer_read_string_until(&tokenizer, []string{"\r\n"}) or_return
+	m.headers = parse_headers(tokenizer.source[tokenizer.position:], allocator) or_return
+
+	return m, nil
 }
 
 parse_headers :: proc(
@@ -184,4 +307,15 @@ test_example_headers_1 :: proc(t: ^testing.T) {
 	testing.expect_value(t, headers["vary"], "Cookie, Accept-Encoding")
 	testing.expect_value(t, headers["x-content-type-options"], "nosniff")
 	testing.expect_value(t, headers["x-frame-options"], "SAMEORIGIN")
+}
+
+@(private = "package")
+@(test)
+test_expires_negative_number :: proc(t: ^testing.T) {
+	context.logger = log.create_console_logger()
+
+	d := "Expires: -1\r\n\r\n"
+	headers, error := parse_headers(d)
+	testing.expect_value(t, error, nil)
+	testing.expect_value(t, headers["expires"], "-1")
 }

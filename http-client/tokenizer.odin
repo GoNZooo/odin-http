@@ -30,6 +30,8 @@ Token :: union {
 	Comma,
 	Dot,
 	Underscore,
+	Dash,
+	Slash,
 	Comment,
 	UpperSymbol,
 	LowerSymbol,
@@ -58,6 +60,8 @@ Colon :: struct {}
 Comma :: struct {}
 Dot :: struct {}
 Underscore :: struct {}
+Dash :: struct {}
+Slash :: struct {}
 Comment :: struct {}
 
 UpperSymbol :: struct {
@@ -162,7 +166,7 @@ tokenizer_expect_exact :: proc(
 	expectation: Token,
 ) -> (
 	token: SourceToken,
-	error: Maybe(ExpectedToken),
+	error: ExpectationError,
 ) {
 	start_location := Location {
 		position = tokenizer.position,
@@ -188,7 +192,7 @@ tokenizer_expect :: proc(
 	expectation: Token,
 ) -> (
 	token: SourceToken,
-	error: Maybe(ExpectedToken),
+	error: ExpectationError,
 ) {
 	start_location := Location {
 		position = tokenizer.position,
@@ -217,7 +221,7 @@ tokenizer_read_string_until :: proc(
 	end_markers: []string,
 ) -> (
 	string: string,
-	error: Maybe(ExpectedEndMarker),
+	error: ExpectationError,
 ) {
 	start_location := Location {
 		position = tokenizer.position,
@@ -247,7 +251,7 @@ tokenizer_skip_string :: proc(
 	tokenizer: ^Tokenizer,
 	expected_string: string,
 ) -> (
-	error: Maybe(ExpectedString),
+	error: ExpectationError,
 ) {
 	start_location := Location {
 		position = tokenizer.position,
@@ -451,6 +455,16 @@ current :: proc(tokenizer: ^Tokenizer, modify: bool) -> (token: Token) {
 		tokenizer_copy.column += 1
 
 		return Underscore{}
+	case '-':
+		tokenizer_copy.position += 1
+		tokenizer_copy.column += 1
+
+		return Dash{}
+	case '/':
+		tokenizer_copy.position += 1
+		tokenizer_copy.column += 1
+
+		return Slash{}
 	case '0' ..= '9':
 		float := read_float(&tokenizer_copy)
 		if float != nil {
@@ -471,7 +485,7 @@ current :: proc(tokenizer: ^Tokenizer, modify: bool) -> (token: Token) {
 		fallthrough
 	case 'a' ..= 'z':
 		return read_lower_symbol(&tokenizer_copy)
-	case 'C' ..= 'Z':
+	case 'A' ..= 'Z':
 		return read_upper_symbol(&tokenizer_copy)
 	case:
 		snippet := tokenizer_copy.source[tokenizer_copy.position:]
@@ -498,9 +512,7 @@ read_lower_symbol :: proc(tokenizer: ^Tokenizer) -> (token: Token) {
 
 	assert(source[0] >= 'a' && source[0] <= 'z')
 
-	// NOTE: This funky addition of double quote is because the syntax highlighting breaks
-	// if you escape a double quote in the string literal...
-	symbol_value := read_until(source, " \t\n()[]{}<>,.:'" + `"`)
+	symbol_value := read_until(source, " \t\n()[]{}<>,.:'\"")
 	symbol_length := len(symbol_value)
 	tokenizer.position += symbol_length
 	tokenizer.column += symbol_length
@@ -515,9 +527,7 @@ read_upper_symbol :: proc(tokenizer: ^Tokenizer) -> (token: Token) {
 
 	assert(source[0] >= 'A' && source[0] <= 'Z')
 
-	// NOTE: This funky addition of double quote is because the syntax highlighting breaks
-	// if you escape a double quote in the string literal...
-	symbol_value := read_until(source, " \t\n()[]{}<>,.:'" + `"`)
+	symbol_value := read_until(source, " \t\n()[]{}<>,.:'\"")
 	symbol_length := len(symbol_value)
 	tokenizer.position += symbol_length
 	tokenizer.column += symbol_length
@@ -908,9 +918,10 @@ test_tokenizer_expect :: proc(t: ^testing.T) {
 		actual = LowerSymbol{value = "hello"},
 		location = Location{position = 0, line = 1, column = 0},
 	}
+	e := expectation_error.(ExpectedToken)
 	testing.expect(
 		t,
-		expectation_error == expected_error,
+		e == expected_error,
 		fmt.tprintf("Expected error: %v, got: %v", expected_error, expectation_error),
 	)
 }
@@ -948,9 +959,10 @@ test_tokenizer_expect_exact :: proc(t: ^testing.T) {
 		actual = LowerSymbol{value = "hello"},
 		location = Location{position = 0, line = 1, column = 0},
 	}
+	e := expectation_error.(ExpectedToken)
 	testing.expect(
 		t,
-		expectation_error == expected_error,
+		e == expected_error,
 		fmt.tprintf("Expected error: %v, got: %v", expected_error, expectation_error),
 	)
 }

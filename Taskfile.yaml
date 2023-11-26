@@ -5,6 +5,49 @@ tasks:
     cmds:
       - task: test
 
+  http-client:
+    cmds:
+      - bin/http-client {{.CLI_ARGS}}
+    deps:
+      - build_http_client
+    method: none
+    silent: true
+
+  build_http_client:
+    cmds:
+      - odin build http-client -out:bin/http-client -o:none -debug
+    sources:
+      - ./http-client/**/*.odin
+    generates:
+      - bin/http-client
+    silent: true
+
+  http_server:
+    cmds:
+      - bin/http-server {{.CLI_ARGS}}
+    deps:
+      - build_http_server
+    method: none
+    silent: true
+
+  build_http_server:
+    cmds:
+      - odin build http-server -out:bin/http-server -o:none -debug
+    sources:
+      - ./http-server/**/*.odin
+      - ./http-client/**/*.odin
+    generates:
+      - bin/http-server
+    silent: true
+
+  debug_http_server:
+    cmds:
+      - gdb ./bin/http-server
+    deps:
+      - build_http_server
+    method: none
+    silent: true
+
   test:
     cmds:
       - task: test-http-client
@@ -15,11 +58,13 @@ tasks:
 
   test-http-client:
     cmds:
-      - odin test http-client
+      - odin test http-client -out:bin/test-http-client
     sources:
       - ./http-client/**/*.odin
     aliases:
       - thc
+    generates:
+      - bin/test-http-client
     method: none
     silent: true
 
