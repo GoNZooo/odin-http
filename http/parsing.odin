@@ -8,7 +8,7 @@ import "core:strconv"
 import "core:strings"
 import "core:testing"
 
-// NOTE(gonz): Making the assumption that 32 kB for headers "ough to be enough for anybody" for now
+import "../tokenization"
 
 MAX_HEADERS_LENGTH :: 32 * 1024
 
@@ -34,14 +34,14 @@ Expected_Header_Value_End :: struct {
 
 Parse_Request_Error :: union {
 	mem.Allocator_Error,
-	Expectation_Error,
+	tokenization.Expectation_Error,
 	Response_Line_Parsing_Error,
 	Header_Parsing_Error,
 }
 
 Parse_Response_Error :: union {
 	mem.Allocator_Error,
-	Expectation_Error,
+	tokenization.Expectation_Error,
 	Response_Line_Parsing_Error,
 	Header_Parsing_Error,
 }
@@ -92,12 +92,12 @@ parse_request :: proc(
 	error: Parse_Request_Error,
 ) {
 	data_string := strings.clone_from_bytes(data, allocator) or_return
-	tokenizer := tokenizer_create(data_string)
-	t := tokenizer_expect(&tokenizer, Upper_Symbol{}) or_return
-	if t.token.(Upper_Symbol).value != "GET" {
-		error = Expectation_Error(
-			Expected_Token{
-				expected = Upper_Symbol{value = "GET"},
+	tokenizer := tokenization.tokenizer_create(data_string)
+	t := tokenization.tokenizer_expect(&tokenizer, tokenization.Upper_Symbol{}) or_return
+	if t.token.(tokenization.Upper_Symbol).value != "GET" {
+		error = tokenization.Expectation_Error(
+			tokenization.Expected_Token{
+				expected = tokenization.Upper_Symbol{value = "GET"},
 				actual = t.token,
 				location = t.location,
 			},
@@ -106,11 +106,11 @@ parse_request :: proc(
 		return Request{}, error
 	}
 
-	tokenizer_skip_any_of(&tokenizer, {Space{}})
+	tokenization.tokenizer_skip_any_of(&tokenizer, {tokenization.Space{}})
 
 	m.method = GET{}
-	m.path = tokenizer_read_string_until(&tokenizer, []string{" "}) or_return
-	m.protocol = tokenizer_read_string_until(&tokenizer, []string{"\r\n"}) or_return
+	m.path = tokenization.tokenizer_read_string_until(&tokenizer, []string{" "}) or_return
+	m.protocol = tokenization.tokenizer_read_string_until(&tokenizer, []string{"\r\n"}) or_return
 	m.headers = parse_headers(tokenizer.source[tokenizer.position:], allocator) or_return
 
 	return m, nil
@@ -124,16 +124,16 @@ parse_response :: proc(
 	error: Parse_Response_Error,
 ) {
 	data_string := strings.clone_from_bytes(data, allocator) or_return
-	tokenizer := tokenizer_create(data_string)
-	m.protocol = tokenizer_read_string_until(&tokenizer, []string{" "}) or_return
-	tokenizer_skip_any_of(&tokenizer, {Space{}})
-	status_string := tokenizer_read_string_until(&tokenizer, []string{" "}) or_return
+	tokenizer := tokenization.tokenizer_create(data_string)
+	m.protocol = tokenization.tokenizer_read_string_until(&tokenizer, []string{" "}) or_return
+	tokenization.tokenizer_skip_any_of(&tokenizer, {tokenization.Space{}})
+	status_string := tokenization.tokenizer_read_string_until(&tokenizer, []string{" "}) or_return
 	status, status_parse_ok := strconv.parse_int(status_string)
 	if !status_parse_ok {
 		return Response{}, Response_Line_Parsing_Error(Invalid_Status{status = status_string})
 	}
 	m.status = status
-	m.message = tokenizer_read_string_until(&tokenizer, []string{"\r\n"}) or_return
+	m.message = tokenization.tokenizer_read_string_until(&tokenizer, []string{"\r\n"}) or_return
 	m.headers = parse_headers(tokenizer.source[tokenizer.position:], allocator) or_return
 
 	return m, nil
@@ -152,39 +152,45 @@ parse_headers :: proc(
 	}
 	headers = make(map[string]string, 0, allocator)
 
-	tokenizer := tokenizer_create(data)
+	tokenizer := tokenization.tokenizer_create(data)
 	for {
-		current_token := tokenizer_peek(&tokenizer)
-		_, is_newline := current_token.(Newline)
+		current_token := tokenization.tokenizer_peek(&tokenizer)
+		_, is_newline := current_token.(tokenization.Newline)
 		if is_newline {
 			break
 		}
-		header_name, end_marker_error := tokenizer_read_string_until(&tokenizer, []string{":"})
+		header_name, end_marker_error := tokenization.tokenizer_read_string_until(
+			&tokenizer,
+			[]string{":"},
+		)
 		if end_marker_error != nil {
 			return nil, Expected_Header_Name_End{data = tokenizer.source[tokenizer.position:]}
 		}
 		header_value_builder: strings.Builder
 		strings.builder_init_none(&header_value_builder, allocator) or_return
 
-		tokenizer_expect_exact(&tokenizer, Colon{})
-		tokenizer_skip_any_of(&tokenizer, {Space{}, Tab{}})
+		tokenization.tokenizer_expect_exact(&tokenizer, tokenization.Colon{})
+		tokenization.tokenizer_skip_any_of(&tokenizer, {tokenization.Space{}, tokenization.Tab{}})
 
 		done_reading_header_value := false
 		for !done_reading_header_value {
-			value_string, read_until_error := tokenizer_read_string_until(
+			value_string, read_until_error := tokenization.tokenizer_read_string_until(
 				&tokenizer,
 				[]string{"\r\n"},
 			)
 			if read_until_error != nil {
 				return nil, Expected_Header_Value_End{name = header_name, data = data}
 			}
-			tokenizer_skip_string(&tokenizer, "\r\n")
+			tokenization.tokenizer_skip_string(&tokenizer, "\r\n")
 
 			strings.write_string(&header_value_builder, value_string)
-			token := tokenizer_peek(&tokenizer)
+			token := tokenization.tokenizer_peek(&tokenizer)
 			#partial switch t in token {
-			case Space, Tab:
-				tokenizer_skip_any_of(&tokenizer, {Space{}, Tab{}})
+			case tokenization.Space, tokenization.Tab:
+				tokenization.tokenizer_skip_any_of(
+					&tokenizer,
+					{tokenization.Space{}, tokenization.Tab{}},
+				)
 				strings.write_byte(&header_value_builder, '\n')
 			case:
 				done_reading_header_value = true

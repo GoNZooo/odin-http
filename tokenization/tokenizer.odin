@@ -1,4 +1,4 @@
-package http
+package tokenization
 
 import "core:fmt"
 import "core:log"
@@ -330,7 +330,6 @@ tokenizer_next_token :: proc(
 	return source_token, current_index, token != nil
 }
 
-@(private = "package")
 tokenizer_peek :: proc(tokenizer: ^Tokenizer) -> (token: Token) {
 	if tokenizer.index >= len(tokenizer.source) {
 		return nil

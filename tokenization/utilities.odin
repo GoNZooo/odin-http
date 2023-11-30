@@ -1,4 +1,4 @@
-package http
+package tokenization
 
 import "core:log"
 import "core:strings"
