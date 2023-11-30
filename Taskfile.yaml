@@ -5,6 +5,17 @@ tasks:
     cmds:
       - task: test
 
+  test_http:
+    cmds:
+      - odin test http -o:none -debug -out:bin/test-http
+    sources:
+      - ./http/**/*.odin
+    aliases:
+      - th
+    generates:
+      - bin/test-http
+    method: none
+
   http-client:
     cmds:
       - bin/http-client {{.CLI_ARGS}}
@@ -18,6 +29,7 @@ tasks:
       - odin build http-client -out:bin/http-client -o:none -debug
     sources:
       - ./http-client/**/*.odin
+      - ./http/**/*.odin
     generates:
       - bin/http-client
     silent: true

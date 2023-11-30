@@ -1,7 +1,6 @@
-package http_client
+package http
 
 import "core:log"
-import "core:mem"
 import "core:strings"
 import "core:testing"
 

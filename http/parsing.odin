@@ -1,4 +1,4 @@
-package http_client
+package http
 
 import "core:fmt"
 import "core:log"
@@ -12,50 +12,50 @@ import "core:testing"
 
 MAX_HEADERS_LENGTH :: 32 * 1024
 
-HeaderParsingError :: union {
-	HeadersTooLong,
-	ExpectedHeaderNameToEnd,
-	ExpectedHeaderValueToEnd,
+Header_Parsing_Error :: union {
+	Headers_Too_Long,
+	Expected_Header_Name_End,
+	Expected_Header_Value_End,
 	runtime.Allocator_Error,
 }
 
-HeadersTooLong :: struct {
+Headers_Too_Long :: struct {
 	length: int,
 }
 
-ExpectedHeaderNameToEnd :: struct {
+Expected_Header_Name_End :: struct {
 	data: string,
 }
 
-ExpectedHeaderValueToEnd :: struct {
+Expected_Header_Value_End :: struct {
 	name: string,
 	data: string,
 }
 
-ParseRequestError :: union {
+Parse_Request_Error :: union {
 	mem.Allocator_Error,
-	ExpectationError,
-	ResponseLineParsingError,
-	HeaderParsingError,
+	Expectation_Error,
+	Response_Line_Parsing_Error,
+	Header_Parsing_Error,
 }
 
-ParseResponseError :: union {
+Parse_Response_Error :: union {
 	mem.Allocator_Error,
-	ExpectationError,
-	ResponseLineParsingError,
-	HeaderParsingError,
+	Expectation_Error,
+	Response_Line_Parsing_Error,
+	Header_Parsing_Error,
 }
 
-ResponseLineParsingError :: union {
-	InvalidProtocol,
-	InvalidStatus,
+Response_Line_Parsing_Error :: union {
+	Invalid_Protocol,
+	Invalid_Status,
 }
 
-InvalidProtocol :: struct {
+Invalid_Protocol :: struct {
 	protocol: string,
 }
 
-InvalidStatus :: struct {
+Invalid_Status :: struct {
 	status: string,
 }
 
@@ -89,15 +89,15 @@ parse_request :: proc(
 	allocator := context.allocator,
 ) -> (
 	m: Request,
-	error: ParseRequestError,
+	error: Parse_Request_Error,
 ) {
 	data_string := strings.clone_from_bytes(data, allocator) or_return
 	tokenizer := tokenizer_create(data_string)
-	t := tokenizer_expect(&tokenizer, UpperSymbol{}) or_return
-	if t.token.(UpperSymbol).value != "GET" {
-		error = ExpectationError(
-			ExpectedToken{
-				expected = UpperSymbol{value = "GET"},
+	t := tokenizer_expect(&tokenizer, Upper_Symbol{}) or_return
+	if t.token.(Upper_Symbol).value != "GET" {
+		error = Expectation_Error(
+			Expected_Token{
+				expected = Upper_Symbol{value = "GET"},
 				actual = t.token,
 				location = t.location,
 			},
@@ -121,30 +121,16 @@ parse_response :: proc(
 	allocator := context.allocator,
 ) -> (
 	m: Response,
-	error: ParseResponseError,
+	error: Parse_Response_Error,
 ) {
 	data_string := strings.clone_from_bytes(data, allocator) or_return
 	tokenizer := tokenizer_create(data_string)
-	t := tokenizer_expect(&tokenizer, UpperSymbol{}) or_return
-	if t.token.(UpperSymbol).value != "GET" {
-		error = ExpectationError(
-			ExpectedToken{
-				expected = UpperSymbol{value = "GET"},
-				actual = t.token,
-				location = t.location,
-			},
-		)
-
-		return Response{}, error
-	}
-
-	tokenizer_skip_any_of(&tokenizer, {Space{}})
-
 	m.protocol = tokenizer_read_string_until(&tokenizer, []string{" "}) or_return
+	tokenizer_skip_any_of(&tokenizer, {Space{}})
 	status_string := tokenizer_read_string_until(&tokenizer, []string{" "}) or_return
-	status, parse_ok := strconv.parse_int(status_string, 10)
-	if !parse_ok {
-		return Response{}, ResponseLineParsingError(InvalidStatus{status = status_string})
+	status, status_parse_ok := strconv.parse_int(status_string)
+	if !status_parse_ok {
+		return Response{}, Response_Line_Parsing_Error(Invalid_Status{status = status_string})
 	}
 	m.status = status
 	m.message = tokenizer_read_string_until(&tokenizer, []string{"\r\n"}) or_return
@@ -158,11 +144,11 @@ parse_headers :: proc(
 	allocator := context.allocator,
 ) -> (
 	headers: map[string]string,
-	error: HeaderParsingError,
+	error: Header_Parsing_Error,
 ) {
 	length := len(data)
 	if length > MAX_HEADERS_LENGTH {
-		return nil, HeadersTooLong{length = length}
+		return nil, Headers_Too_Long{length = length}
 	}
 	headers = make(map[string]string, 0, allocator)
 
@@ -175,7 +161,7 @@ parse_headers :: proc(
 		}
 		header_name, end_marker_error := tokenizer_read_string_until(&tokenizer, []string{":"})
 		if end_marker_error != nil {
-			return nil, ExpectedHeaderNameToEnd{data = tokenizer.source[tokenizer.position:]}
+			return nil, Expected_Header_Name_End{data = tokenizer.source[tokenizer.position:]}
 		}
 		header_value_builder: strings.Builder
 		strings.builder_init_none(&header_value_builder, allocator) or_return
@@ -190,7 +176,7 @@ parse_headers :: proc(
 				[]string{"\r\n"},
 			)
 			if read_until_error != nil {
-				return nil, ExpectedHeaderValueToEnd{name = header_name, data = data}
+				return nil, Expected_Header_Value_End{name = header_name, data = data}
 			}
 			tokenizer_skip_string(&tokenizer, "\r\n")
 
@@ -242,7 +228,7 @@ test_headers_too_long :: proc(t: ^testing.T) {
 
 	d := strings.repeat("a", MAX_HEADERS_LENGTH + 1)
 	headers, error := parse_headers(d)
-	testing.expect_value(t, error, HeadersTooLong{length = MAX_HEADERS_LENGTH + 1})
+	testing.expect_value(t, error, Headers_Too_Long{length = MAX_HEADERS_LENGTH + 1})
 	testing.expect(t, headers == nil, fmt.tprintf("headers == nil: %v", headers == nil))
 }
 
@@ -317,5 +303,5 @@ test_expires_negative_number :: proc(t: ^testing.T) {
 	d := "Expires: -1\r\n\r\n"
 	headers, error := parse_headers(d)
 	testing.expect_value(t, error, nil)
-	testing.expect_value(t, headers["expires"], "-1")
+	testing.expect_value(t, headers["Expires"], "-1")
 }

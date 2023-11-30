@@ -1,4 +1,4 @@
-package http_client
+package http
 
 import "core:fmt"
 import "core:log"
@@ -7,7 +7,7 @@ import "core:strconv"
 import "core:strings"
 import "core:testing"
 
-SourceToken :: struct {
+Source_Token :: struct {
 	token:    Token,
 	location: Location,
 }
@@ -17,14 +17,14 @@ Token :: union {
 	Newline,
 	Tab,
 	Space,
-	LeftParenthesis,
-	RightParenthesis,
-	LeftSquareBracket,
-	RightSquareBracket,
-	LeftCurlyBrace,
-	RightCurlyBrace,
-	LeftAngleBracket,
-	RightAngleBracket,
+	Left_Parenthesis,
+	Right_Parenthesis,
+	Left_Square_Bracket,
+	Right_Square_Bracket,
+	Left_Curly_Brace,
+	Right_Curly_Brace,
+	Left_Angle_Bracket,
+	Right_Angle_Bracket,
 	Caret,
 	Colon,
 	Comma,
@@ -33,10 +33,10 @@ Token :: union {
 	Dash,
 	Slash,
 	Comment,
-	UpperSymbol,
-	LowerSymbol,
+	Upper_Symbol,
+	Lower_Symbol,
 	String,
-	SingleQuotedString,
+	Single_Quoted_String,
 	Float,
 	Integer,
 	Char,
@@ -47,14 +47,14 @@ EOF :: struct {}
 Newline :: struct {}
 Tab :: struct {}
 Space :: struct {}
-LeftParenthesis :: struct {}
-RightParenthesis :: struct {}
-LeftSquareBracket :: struct {}
-RightSquareBracket :: struct {}
-LeftCurlyBrace :: struct {}
-RightCurlyBrace :: struct {}
-LeftAngleBracket :: struct {}
-RightAngleBracket :: struct {}
+Left_Parenthesis :: struct {}
+Right_Parenthesis :: struct {}
+Left_Square_Bracket :: struct {}
+Right_Square_Bracket :: struct {}
+Left_Curly_Brace :: struct {}
+Right_Curly_Brace :: struct {}
+Left_Angle_Bracket :: struct {}
+Right_Angle_Bracket :: struct {}
 Caret :: struct {}
 Colon :: struct {}
 Comma :: struct {}
@@ -64,11 +64,11 @@ Dash :: struct {}
 Slash :: struct {}
 Comment :: struct {}
 
-UpperSymbol :: struct {
+Upper_Symbol :: struct {
 	value: string,
 }
 
-LowerSymbol :: struct {
+Lower_Symbol :: struct {
 	value: string,
 }
 
@@ -76,7 +76,7 @@ String :: struct {
 	value: string,
 }
 
-SingleQuotedString :: struct {
+Single_Quoted_String :: struct {
 	value: string,
 }
 
@@ -110,39 +110,39 @@ Tokenizer :: struct {
 	column:   int,
 }
 
-ExpectationError :: union {
-	ExpectedToken,
-	ExpectedString,
-	ExpectedEndMarker,
-	ExpectedOneOf,
+Expectation_Error :: union {
+	Expected_Token,
+	Expected_String,
+	Expected_End_Marker,
+	Expected_One_Of,
 }
 
-ExpectedTokenError :: union {
-	ExpectedToken,
+Expected_Token_Error :: union {
+	Expected_Token,
 }
 
-ExpectedToken :: struct {
+Expected_Token :: struct {
 	expected: Token,
 	actual:   Token,
 	location: Location,
 }
 
-ExpectedString :: struct {
+Expected_String :: struct {
 	expected: string,
 	actual:   string,
 	location: Location,
 }
 
-ExpectedEndMarker :: struct {
+Expected_End_Marker :: struct {
 	expected: []string,
 	location: Location,
 }
 
-ExpectedOneOfError :: union {
-	ExpectedOneOf,
+Expected_One_Of_Error :: union {
+	Expected_One_Of,
 }
 
-ExpectedOneOf :: struct {
+Expected_One_Of :: struct {
 	expected: []Token,
 	actual:   Token,
 	location: Location,
@@ -165,8 +165,8 @@ tokenizer_expect_exact :: proc(
 	tokenizer: ^Tokenizer,
 	expectation: Token,
 ) -> (
-	token: SourceToken,
-	error: ExpectationError,
+	token: Source_Token,
+	error: Expectation_Error,
 ) {
 	start_location := Location {
 		position = tokenizer.position,
@@ -176,8 +176,8 @@ tokenizer_expect_exact :: proc(
 	read_token, _, _ := tokenizer_next_token(tokenizer)
 
 	if read_token.token != expectation {
-		return SourceToken{},
-			ExpectedToken{
+		return Source_Token{},
+			Expected_Token{
 				expected = expectation,
 				actual = read_token.token,
 				location = start_location,
@@ -191,8 +191,8 @@ tokenizer_expect :: proc(
 	tokenizer: ^Tokenizer,
 	expectation: Token,
 ) -> (
-	token: SourceToken,
-	error: ExpectationError,
+	token: Source_Token,
+	error: Expectation_Error,
 ) {
 	start_location := Location {
 		position = tokenizer.position,
@@ -205,8 +205,8 @@ tokenizer_expect :: proc(
 	token_typeid := reflect.union_variant_typeid(read_token.token)
 
 	if expectation_typeid != token_typeid {
-		return SourceToken{},
-			ExpectedToken{
+		return Source_Token{},
+			Expected_Token{
 				expected = expectation,
 				actual = read_token.token,
 				location = start_location,
@@ -221,7 +221,7 @@ tokenizer_read_string_until :: proc(
 	end_markers: []string,
 ) -> (
 	string: string,
-	error: ExpectationError,
+	error: Expectation_Error,
 ) {
 	start_location := Location {
 		position = tokenizer.position,
@@ -231,7 +231,7 @@ tokenizer_read_string_until :: proc(
 	source := tokenizer.source[tokenizer.position:]
 	end_marker_index, _ := strings.index_multi(source, end_markers)
 	if end_marker_index == -1 {
-		return "", ExpectedEndMarker{expected = end_markers, location = start_location}
+		return "", Expected_End_Marker{expected = end_markers, location = start_location}
 	}
 
 	string = source[:end_marker_index]
@@ -251,7 +251,7 @@ tokenizer_skip_string :: proc(
 	tokenizer: ^Tokenizer,
 	expected_string: string,
 ) -> (
-	error: ExpectationError,
+	error: Expectation_Error,
 ) {
 	start_location := Location {
 		position = tokenizer.position,
@@ -264,7 +264,7 @@ tokenizer_skip_string :: proc(
 		rest_length := min(len(expected_string), len(source))
 
 		return(
-			ExpectedString{
+			Expected_String{
 				expected = expected_string,
 				actual = source[:rest_length],
 				location = start_location,
@@ -303,11 +303,11 @@ tokenizer_skip_any_of :: proc(tokenizer: ^Tokenizer, tokens: []Token) {
 tokenizer_next_token :: proc(
 	tokenizer: ^Tokenizer,
 ) -> (
-	source_token: SourceToken,
+	source_token: Source_Token,
 	index: int,
 	ok: bool,
 ) {
-	source_token = SourceToken {
+	source_token = Source_Token {
 		location = Location{
 			position = tokenizer.position,
 			line = tokenizer.line,
@@ -392,42 +392,42 @@ current :: proc(tokenizer: ^Tokenizer, modify: bool) -> (token: Token) {
 		tokenizer_copy.position += 1
 		tokenizer_copy.column += 1
 
-		return LeftParenthesis{}
+		return Left_Parenthesis{}
 	case ')':
 		tokenizer_copy.position += 1
 		tokenizer_copy.column += 1
 
-		return RightParenthesis{}
+		return Right_Parenthesis{}
 	case '[':
 		tokenizer_copy.position += 1
 		tokenizer_copy.column += 1
 
-		return LeftSquareBracket{}
+		return Left_Square_Bracket{}
 	case ']':
 		tokenizer_copy.position += 1
 		tokenizer_copy.column += 1
 
-		return RightSquareBracket{}
+		return Right_Square_Bracket{}
 	case '{':
 		tokenizer_copy.position += 1
 		tokenizer_copy.column += 1
 
-		return LeftCurlyBrace{}
+		return Left_Curly_Brace{}
 	case '}':
 		tokenizer_copy.position += 1
 		tokenizer_copy.column += 1
 
-		return RightCurlyBrace{}
+		return Right_Curly_Brace{}
 	case '<':
 		tokenizer_copy.position += 1
 		tokenizer_copy.column += 1
 
-		return LeftAngleBracket{}
+		return Left_Angle_Bracket{}
 	case '>':
 		tokenizer_copy.position += 1
 		tokenizer_copy.column += 1
 
-		return RightAngleBracket{}
+		return Right_Angle_Bracket{}
 	case '^':
 		tokenizer_copy.position += 1
 		tokenizer_copy.column += 1
@@ -517,7 +517,7 @@ read_lower_symbol :: proc(tokenizer: ^Tokenizer) -> (token: Token) {
 	tokenizer.position += symbol_length
 	tokenizer.column += symbol_length
 
-	return LowerSymbol{value = symbol_value}
+	return Lower_Symbol{value = symbol_value}
 }
 
 @(private = "file")
@@ -532,7 +532,7 @@ read_upper_symbol :: proc(tokenizer: ^Tokenizer) -> (token: Token) {
 	tokenizer.position += symbol_length
 	tokenizer.column += symbol_length
 
-	return UpperSymbol{value = symbol_value}
+	return Upper_Symbol{value = symbol_value}
 }
 
 @(private = "file")
@@ -669,7 +669,7 @@ read_string :: proc(tokenizer: ^Tokenizer, quote_characters: string) -> (token: 
 	}
 
 	if quote_characters == "'" {
-		return SingleQuotedString{value = string_contents}
+		return Single_Quoted_String{value = string_contents}
 	}
 
 	return String{value = string_contents}
@@ -698,7 +698,7 @@ test_tokenize_integer :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
 		token,
-		SourceToken{
+		Source_Token{
 			token = Integer{value = 123},
 			location = Location{position = 0, line = 1, column = 0},
 		},
@@ -716,7 +716,7 @@ test_tokenize_float :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
 		token,
-		SourceToken{
+		Source_Token{
 			token = Float{value = 42},
 			location = Location{position = 0, line = 1, column = 0},
 		},
@@ -734,7 +734,7 @@ test_read_double_quoted_string :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
 		token,
-		SourceToken{
+		Source_Token{
 			token = String{value = "hello"},
 			location = Location{position = 0, line = 1, column = 0},
 		},
@@ -754,8 +754,8 @@ test_read_single_quoted_string :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
 		token,
-		SourceToken{
-			token = SingleQuotedString{value = "hello"},
+		Source_Token{
+			token = Single_Quoted_String{value = "hello"},
 			location = Location{position = 0, line = 1, column = 0},
 		},
 	)
@@ -770,42 +770,42 @@ test_read_symbols :: proc(t: ^testing.T) {
 	context.logger = log.create_console_logger()
 
 	tokenizer := tokenizer_create("()[]{}<>:,.")
-	expected_tokens := []SourceToken{
-		SourceToken{
-			token = LeftParenthesis{},
+	expected_tokens := []Source_Token{
+		Source_Token{
+			token = Left_Parenthesis{},
 			location = Location{position = 0, line = 1, column = 0},
 		},
-		SourceToken{
-			token = RightParenthesis{},
+		Source_Token{
+			token = Right_Parenthesis{},
 			location = Location{position = 1, line = 1, column = 1},
 		},
-		SourceToken{
-			token = LeftSquareBracket{},
+		Source_Token{
+			token = Left_Square_Bracket{},
 			location = Location{position = 2, line = 1, column = 2},
 		},
-		SourceToken{
-			token = RightSquareBracket{},
+		Source_Token{
+			token = Right_Square_Bracket{},
 			location = Location{position = 3, line = 1, column = 3},
 		},
-		SourceToken{
-			token = LeftCurlyBrace{},
+		Source_Token{
+			token = Left_Curly_Brace{},
 			location = Location{position = 4, line = 1, column = 4},
 		},
-		SourceToken{
-			token = RightCurlyBrace{},
+		Source_Token{
+			token = Right_Curly_Brace{},
 			location = Location{position = 5, line = 1, column = 5},
 		},
-		SourceToken{
-			token = LeftAngleBracket{},
+		Source_Token{
+			token = Left_Angle_Bracket{},
 			location = Location{position = 6, line = 1, column = 6},
 		},
-		SourceToken{
-			token = RightAngleBracket{},
+		Source_Token{
+			token = Right_Angle_Bracket{},
 			location = Location{position = 7, line = 1, column = 7},
 		},
-		SourceToken{token = Colon{}, location = Location{position = 8, line = 1, column = 8}},
-		SourceToken{token = Comma{}, location = Location{position = 9, line = 1, column = 9}},
-		SourceToken{token = Dot{}, location = Location{position = 10, line = 1, column = 10}},
+		Source_Token{token = Colon{}, location = Location{position = 8, line = 1, column = 8}},
+		Source_Token{token = Comma{}, location = Location{position = 9, line = 1, column = 9}},
+		Source_Token{token = Dot{}, location = Location{position = 10, line = 1, column = 10}},
 	}
 	token_count := 0
 	for token, i in tokenizer_next_token(&tokenizer) {
@@ -820,16 +820,16 @@ test_read_char :: proc(t: ^testing.T) {
 	context.logger = log.create_console_logger()
 
 	tokenizer := tokenizer_create("$a$b$c")
-	expected_tokens := []SourceToken{
-		SourceToken{
+	expected_tokens := []Source_Token{
+		Source_Token{
 			token = Char{value = 'a'},
 			location = Location{position = 0, line = 1, column = 0},
 		},
-		SourceToken{
+		Source_Token{
 			token = Char{value = 'b'},
 			location = Location{position = 2, line = 1, column = 2},
 		},
-		SourceToken{
+		Source_Token{
 			token = Char{value = 'c'},
 			location = Location{position = 4, line = 1, column = 4},
 		},
@@ -847,14 +847,14 @@ test_read_boolean :: proc(t: ^testing.T) {
 	context.logger = log.create_console_logger()
 
 	tokenizer := tokenizer_create("true \nfalse")
-	expected_tokens := []SourceToken{
-		SourceToken{
+	expected_tokens := []Source_Token{
+		Source_Token{
 			token = Boolean{value = true},
 			location = Location{position = 0, line = 1, column = 0},
 		},
-		SourceToken{token = Space{}, location = Location{position = 4, line = 1, column = 4}},
-		SourceToken{token = Newline{}, location = Location{position = 5, line = 1, column = 5}},
-		SourceToken{
+		Source_Token{token = Space{}, location = Location{position = 4, line = 1, column = 4}},
+		Source_Token{token = Newline{}, location = Location{position = 5, line = 1, column = 5}},
+		Source_Token{
 			token = Boolean{value = false},
 			location = Location{position = 6, line = 2, column = 0},
 		},
@@ -872,14 +872,14 @@ test_read_lower_symbol :: proc(t: ^testing.T) {
 	context.logger = log.create_console_logger()
 
 	tokenizer := tokenizer_create("hello there")
-	expected_tokens := []SourceToken{
-		SourceToken{
-			token = LowerSymbol{value = "hello"},
+	expected_tokens := []Source_Token{
+		Source_Token{
+			token = Lower_Symbol{value = "hello"},
 			location = Location{position = 0, line = 1, column = 0},
 		},
-		SourceToken{token = Space{}, location = Location{position = 5, line = 1, column = 5}},
-		SourceToken{
-			token = LowerSymbol{value = "there"},
+		Source_Token{token = Space{}, location = Location{position = 5, line = 1, column = 5}},
+		Source_Token{
+			token = Lower_Symbol{value = "there"},
 			location = Location{position = 6, line = 1, column = 6},
 		},
 	}
@@ -896,7 +896,7 @@ test_tokenizer_expect :: proc(t: ^testing.T) {
 	context.logger = log.create_console_logger()
 
 	tokenizer := tokenizer_create("hello")
-	read_token, expectation_error := tokenizer_expect(&tokenizer, LowerSymbol{})
+	read_token, expectation_error := tokenizer_expect(&tokenizer, Lower_Symbol{})
 	testing.expect(
 		t,
 		expectation_error == nil,
@@ -905,20 +905,20 @@ test_tokenizer_expect :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
 		read_token,
-		SourceToken{
-			token = LowerSymbol{value = "hello"},
+		Source_Token{
+			token = Lower_Symbol{value = "hello"},
 			location = Location{position = 0, line = 1, column = 0},
 		},
 	)
 
 	tokenizer2 := tokenizer_create("hello")
-	read_token, expectation_error = tokenizer_expect(&tokenizer2, UpperSymbol{})
-	expected_error := ExpectedToken {
-		expected = UpperSymbol{},
-		actual = LowerSymbol{value = "hello"},
+	read_token, expectation_error = tokenizer_expect(&tokenizer2, Upper_Symbol{})
+	expected_error := Expected_Token {
+		expected = Upper_Symbol{},
+		actual = Lower_Symbol{value = "hello"},
 		location = Location{position = 0, line = 1, column = 0},
 	}
-	e := expectation_error.(ExpectedToken)
+	e := expectation_error.(Expected_Token)
 	testing.expect(
 		t,
 		e == expected_error,
@@ -933,7 +933,7 @@ test_tokenizer_expect_exact :: proc(t: ^testing.T) {
 	tokenizer := tokenizer_create("hello")
 	read_token, expectation_error := tokenizer_expect_exact(
 		&tokenizer,
-		LowerSymbol{value = "hello"},
+		Lower_Symbol{value = "hello"},
 	)
 	testing.expect(
 		t,
@@ -943,8 +943,8 @@ test_tokenizer_expect_exact :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
 		read_token,
-		SourceToken{
-			token = LowerSymbol{value = "hello"},
+		Source_Token{
+			token = Lower_Symbol{value = "hello"},
 			location = Location{position = 0, line = 1, column = 0},
 		},
 	)
@@ -952,14 +952,14 @@ test_tokenizer_expect_exact :: proc(t: ^testing.T) {
 	tokenizer2 := tokenizer_create("hello")
 	read_token, expectation_error = tokenizer_expect_exact(
 		&tokenizer2,
-		LowerSymbol{value = "world"},
+		Lower_Symbol{value = "world"},
 	)
-	expected_error := ExpectedToken {
-		expected = LowerSymbol{value = "world"},
-		actual = LowerSymbol{value = "hello"},
+	expected_error := Expected_Token {
+		expected = Lower_Symbol{value = "world"},
+		actual = Lower_Symbol{value = "hello"},
 		location = Location{position = 0, line = 1, column = 0},
 	}
-	e := expectation_error.(ExpectedToken)
+	e := expectation_error.(Expected_Token)
 	testing.expect(
 		t,
 		e == expected_error,
