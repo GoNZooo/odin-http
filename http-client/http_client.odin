@@ -47,34 +47,75 @@ main :: proc() {
 	fmt.printf("Headers: %#v\n", headers)
 	fmt.printf("Response: %#v\n", response)
 
-	recv_buffer: [1024]byte
+	recv_buffer := make([]byte, 256 * mem.Megabyte)
 	bytes_received, recv_error := net.recv_tcp(socket, recv_buffer[:])
 	if recv_error != nil {
 		fmt.printf("Error when receiving: %v\n", recv_error)
 
 		os.exit(1)
 	}
+	log.debugf("bytes_received: %d\n", bytes_received)
 
-	log.debugf("received on socket %d:\n'''\n%#02x\n'''", socket, recv_buffer[:bytes_received])
-	frame, frame_parse_error := parse_websocket_frame(recv_buffer[:bytes_received])
+	frame, frame_parse_error := parse_websocket_fragment(recv_buffer[:])
 	if frame_parse_error != nil {
 		fmt.printf("Error when parsing frame: %v\n", frame_parse_error)
 
 		os.exit(1)
 	}
 
-	switch f in frame {
-	case Ping_Frame:
+	fmt.printf("frame.final=%v\n", frame.final)
+	switch f in frame.data {
+	case Continuation_Data:
+		fmt.printf("Continuation frame payload length: %d\n", len(f.payload))
+	case Text_Data:
+		fmt.printf("Text frame payload length: %d\n", len(f.payload))
+	case Binary_Data:
+		fmt.printf("Binary frame payload length: %d\n", len(f.payload))
+	case Close_Data:
+		fmt.printf("Close frame payload: '%s'\n", f.payload)
+	case Ping_Data:
 		fmt.printf("Ping frame payload: '%s'\n", f.payload)
+	case Pong_Data:
+		fmt.printf("Pong frame payload: '%s'\n", f.payload)
 	}
 
 }
 
-Websocket_Frame :: union {
-	Ping_Frame,
+Websocket_Fragment :: struct {
+	data:  Websocket_Fragment_Data,
+	final: bool,
 }
 
-Ping_Frame :: struct {
+Websocket_Fragment_Data :: union {
+	Continuation_Data,
+	Text_Data,
+	Binary_Data,
+	Close_Data,
+	Ping_Data,
+	Pong_Data,
+}
+
+Continuation_Data :: struct {
+	payload: []byte,
+}
+
+Text_Data :: struct {
+	payload: []byte,
+}
+
+Binary_Data :: struct {
+	payload: []byte,
+}
+
+Close_Data :: struct {
+	payload: []byte,
+}
+
+Ping_Data :: struct {
+	payload: []byte,
+}
+
+Pong_Data :: struct {
 	payload: []byte,
 }
 
@@ -86,38 +127,45 @@ Invalid_Opcode :: struct {
 	opcode: u8,
 }
 
-parse_websocket_frame :: proc(
+parse_websocket_fragment :: proc(
 	data: []byte,
 ) -> (
-	frame: Websocket_Frame,
+	frame: Websocket_Fragment,
 	error: Websocket_Parse_Error,
 ) {
 	i: int
 	first_byte := data[0]
-	// fin := (first_byte & 0x80) != 0
+	fin := (first_byte & 0x80) != 0
+	frame.final = fin
 	opcode := first_byte & 0x0f
 	i += 1
 
 	second_byte := data[1]
 	mask := (second_byte & 0x80) != 0
 	payload_length: u64 = u64(second_byte) & 0x7f
+	log.debugf("initial length: %d\n", payload_length)
 	i += 1
 	if payload_length == 126 {
-		payload_length = u64(u16(data[2]) << 8 | u16(data[3]))
+		payload_length_bytes := [2]byte{data[i], data[i + 1]}
+		payload_length = u64(transmute(u16be)payload_length_bytes)
+		log.debugf("16 bit payload length: %d\n", payload_length)
 		i += 2
 	} else if payload_length == 127 {
-		payload_length = u64(
-			u16(data[2]) << 56 |
-			u16(data[3]) << 48 |
-			u16(data[4]) << 40 |
-			u16(data[5]) << 32 |
-			u16(data[6]) << 24 |
-			u16(data[7]) << 16 |
-			u16(data[8]) << 8 |
-			u16(data[9]),
-		)
+		payload_length_bytes := [8]byte {
+			data[i],
+			data[i + 1],
+			data[i + 2],
+			data[i + 3],
+			data[i + 4],
+			data[i + 5],
+			data[i + 6],
+			data[i + 7],
+		}
+		payload_length = u64(transmute(u64be)payload_length_bytes)
+		log.debugf("64 bit payload length: %d\n", payload_length)
 		i += 8
 	}
+	log.debugf("payload_length: %d\n", payload_length)
 
 	if mask {
 		mask_key := data[i:i + 4]
@@ -130,11 +178,19 @@ parse_websocket_frame :: proc(
 	payload := data[i:i + int(payload_length)]
 
 	switch opcode {
-	case 0x09:
-		return Ping_Frame{payload = payload}, nil
 	case 0x02:
+		frame.data = Binary_Data {
+			payload = payload,
+		}
+
+		return frame, nil
+	case 0x09:
+		frame.data = Ping_Data {
+			payload = payload,
+		}
+		return frame, nil
 	case:
-		return Websocket_Frame{}, Invalid_Opcode{opcode = opcode}
+		return Websocket_Fragment{}, Invalid_Opcode{opcode = opcode}
 	}
 
 	return frame, nil
@@ -196,7 +252,6 @@ get :: proc(
 		return http.Response{}, socket, recv_error
 	}
 
-	log.debugf("received:\n'''\n%s\n'''", recv_buffer[:bytes_received])
 	response = http.parse_response(recv_buffer[:bytes_received], allocator) or_return
 
 	return response, socket, nil
