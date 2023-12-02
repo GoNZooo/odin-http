@@ -16,6 +16,7 @@ Header_Parsing_Error :: union {
 	Headers_Too_Long,
 	Expected_Header_Name_End,
 	Expected_Header_Value_End,
+	Expected_Header_End_Marker,
 	runtime.Allocator_Error,
 }
 
@@ -29,6 +30,10 @@ Expected_Header_Name_End :: struct {
 
 Expected_Header_Value_End :: struct {
 	name: string,
+	data: string,
+}
+
+Expected_Header_End_Marker :: struct {
 	data: string,
 }
 
@@ -71,7 +76,7 @@ Response :: struct {
 	status:   int,
 	message:  string,
 	headers:  map[string]string,
-	body:     []byte,
+	body:     string,
 }
 
 Method :: union {
@@ -96,7 +101,7 @@ parse_request :: proc(
 	t := tokenization.tokenizer_expect(&tokenizer, tokenization.Upper_Symbol{}) or_return
 	if t.token.(tokenization.Upper_Symbol).value != "GET" {
 		error = tokenization.Expectation_Error(
-			tokenization.Expected_Token{
+			tokenization.Expected_Token {
 				expected = tokenization.Upper_Symbol{value = "GET"},
 				actual = t.token,
 				location = t.location,
@@ -111,7 +116,7 @@ parse_request :: proc(
 	m.method = GET{}
 	m.path = tokenization.tokenizer_read_string_until(&tokenizer, []string{" "}) or_return
 	m.protocol = tokenization.tokenizer_read_string_until(&tokenizer, []string{"\r\n"}) or_return
-	m.headers = parse_headers(tokenizer.source[tokenizer.position:], allocator) or_return
+	m.headers, _ = parse_headers(tokenizer.source[tokenizer.position:], allocator) or_return
 
 	return m, nil
 }
@@ -133,8 +138,15 @@ parse_response :: proc(
 		return Response{}, Response_Line_Parsing_Error(Invalid_Status{status = status_string})
 	}
 	m.status = status
+	tokenization.tokenizer_skip_any_of(&tokenizer, {tokenization.Space{}})
 	m.message = tokenization.tokenizer_read_string_until(&tokenizer, []string{"\r\n"}) or_return
-	m.headers = parse_headers(tokenizer.source[tokenizer.position:], allocator) or_return
+	tokenization.tokenizer_skip_string(&tokenizer, "\r\n") or_return
+	header_bytes: int
+	m.headers, header_bytes = parse_headers(
+		tokenizer.source[tokenizer.position:],
+		allocator,
+	) or_return
+	m.body = tokenizer.source[tokenizer.position + header_bytes:]
 
 	return m, nil
 }
@@ -144,11 +156,12 @@ parse_headers :: proc(
 	allocator := context.allocator,
 ) -> (
 	headers: map[string]string,
+	bytes_processed: int,
 	error: Header_Parsing_Error,
 ) {
 	length := len(data)
 	if length > MAX_HEADERS_LENGTH {
-		return nil, Headers_Too_Long{length = length}
+		return nil, 0, Headers_Too_Long{length = length}
 	}
 	headers = make(map[string]string, 0, allocator)
 
@@ -164,7 +177,9 @@ parse_headers :: proc(
 			[]string{":"},
 		)
 		if end_marker_error != nil {
-			return nil, Expected_Header_Name_End{data = tokenizer.source[tokenizer.position:]}
+			return nil,
+				tokenizer.position,
+				Expected_Header_Name_End{data = tokenizer.source[tokenizer.position:]}
 		}
 		header_value_builder: strings.Builder
 		strings.builder_init_none(&header_value_builder, allocator) or_return
@@ -179,7 +194,9 @@ parse_headers :: proc(
 				[]string{"\r\n"},
 			)
 			if read_until_error != nil {
-				return nil, Expected_Header_Value_End{name = header_name, data = data}
+				return nil,
+					tokenizer.position,
+					Expected_Header_Value_End{name = header_name, data = data}
 			}
 			tokenization.tokenizer_skip_string(&tokenizer, "\r\n")
 
@@ -201,52 +218,55 @@ parse_headers :: proc(
 		headers[header_name] = header_value
 	}
 
-	return headers, nil
+	skip_error := tokenization.tokenizer_skip_string(&tokenizer, "\r\n")
+	if skip_error != nil {
+		return nil,
+			tokenizer.position,
+			Expected_Header_End_Marker{data = tokenizer.source[tokenizer.position:]}
+	}
+
+	return headers, tokenizer.position, nil
 }
 
-@(private = "package")
-@(test)
+@(test, private = "package")
 test_normal_single_header_value :: proc(t: ^testing.T) {
 	context.logger = log.create_console_logger()
 
 	d := "Content-Type: text/html\r\n\r\n"
-	headers, error := parse_headers(d)
+	headers, _, error := parse_headers(d)
 	testing.expect_value(t, error, nil)
 	testing.expect_value(t, headers["Content-Type"], "text/html")
 }
 
-@(private = "package")
-@(test)
+@(test, private = "package")
 test_multiline_single_header_and_normal_value :: proc(t: ^testing.T) {
 	context.logger = log.create_console_logger()
 
 	d := "X-Multiline-Weird-Header: start of value\r\n end of value\r\nContent-Type: text/html\r\n\r\n"
-	headers, error := parse_headers(d)
+	headers, _, error := parse_headers(d)
 	testing.expect_value(t, error, nil)
 	testing.expect_value(t, headers["Content-Type"], "text/html")
 	testing.expect_value(t, headers["X-Multiline-Weird-Header"], "start of value\nend of value")
 }
 
-@(private = "package")
-@(test)
+@(test, private = "package")
 test_headers_too_long :: proc(t: ^testing.T) {
 	context.logger = log.create_console_logger()
 
 	d := strings.repeat("a", MAX_HEADERS_LENGTH + 1)
-	headers, error := parse_headers(d)
+	headers, _, error := parse_headers(d)
 	testing.expect_value(t, error, Headers_Too_Long{length = MAX_HEADERS_LENGTH + 1})
 	testing.expect(t, headers == nil, fmt.tprintf("headers == nil: %v", headers == nil))
 }
 
-@(private = "package")
-@(test)
+@(test, private = "package")
 test_example_headers_1 :: proc(t: ^testing.T) {
 	context.logger = log.create_console_logger()
 
 	d := strings.concatenate(
-		{
+		 {
 			strings.join(
-				[]string{
+				[]string {
 					"CF-Cache-Status: HIT",
 					"CF-RAY: 808909585be53dc0-SOF",
 					"Cache-Control: public, max-age=14400",
@@ -271,7 +291,7 @@ test_example_headers_1 :: proc(t: ^testing.T) {
 			"\r\n\r\n",
 		},
 	)
-	headers, error := parse_headers(d)
+	headers, _, error := parse_headers(d)
 	testing.expect_value(t, error, nil)
 	testing.expect_value(t, headers["CF-Cache-Status"], "HIT")
 	testing.expect_value(t, headers["CF-RAY"], "808909585be53dc0-SOF")
@@ -301,13 +321,12 @@ test_example_headers_1 :: proc(t: ^testing.T) {
 	testing.expect_value(t, headers["x-frame-options"], "SAMEORIGIN")
 }
 
-@(private = "package")
-@(test)
+@(test, private = "package")
 test_expires_negative_number :: proc(t: ^testing.T) {
 	context.logger = log.create_console_logger()
 
 	d := "Expires: -1\r\n\r\n"
-	headers, error := parse_headers(d)
+	headers, _, error := parse_headers(d)
 	testing.expect_value(t, error, nil)
 	testing.expect_value(t, headers["Expires"], "-1")
 }
