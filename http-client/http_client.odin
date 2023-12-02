@@ -56,12 +56,14 @@ main :: proc() {
 	}
 	log.debugf("bytes_received: %d\n", bytes_received)
 
-	frame, frame_parse_error := parse_websocket_fragment(recv_buffer[:])
+	frame, remaining_data, frame_parse_error := parse_websocket_fragment(recv_buffer[:])
 	if frame_parse_error != nil {
 		fmt.printf("Error when parsing frame: %v\n", frame_parse_error)
 
 		os.exit(1)
 	}
+
+	log.debugf("len(remaining_data): %d\n", len(remaining_data))
 
 	fmt.printf("frame.final=%v\n", frame.final)
 	switch f in frame.data {
@@ -131,12 +133,12 @@ parse_websocket_fragment :: proc(
 	data: []byte,
 ) -> (
 	frame: Websocket_Fragment,
+	remaining_data: []byte,
 	error: Websocket_Parse_Error,
 ) {
 	i: int
 	first_byte := data[0]
-	fin := (first_byte & 0x80) != 0
-	frame.final = fin
+	frame.final = (first_byte & 0x80) != 0
 	opcode := first_byte & 0x0f
 	i += 1
 
@@ -171,29 +173,60 @@ parse_websocket_fragment :: proc(
 		mask_key := data[i:i + 4]
 		i += 4
 		for j := u64(0); j < payload_length; j += 1 {
-			data[i + int(j)] = mask_key[j % 4]
+			data[i + int(j)] = data[i + int(j)] ~ mask_key[j % 4]
 		}
 	}
 
 	payload := data[i:i + int(payload_length)]
+	remaining_data = data[i + int(payload_length):]
 
 	switch opcode {
+	case 0x00:
+		frame.data = Continuation_Data {
+			payload = payload,
+		}
+
+		return frame, remaining_data, nil
+
+	case 0x01:
+		frame.data = Text_Data {
+			payload = payload,
+		}
+
+		return frame, remaining_data, nil
+
 	case 0x02:
 		frame.data = Binary_Data {
 			payload = payload,
 		}
 
-		return frame, nil
+		return frame, remaining_data, nil
+
+	// control fragments
+	case 0x08:
+		frame.data = Close_Data {
+			payload = payload,
+		}
+
+		return frame, remaining_data, nil
+
 	case 0x09:
 		frame.data = Ping_Data {
 			payload = payload,
 		}
-		return frame, nil
-	case:
-		return Websocket_Fragment{}, Invalid_Opcode{opcode = opcode}
-	}
 
-	return frame, nil
+		return frame, remaining_data, nil
+
+	case 0x0a:
+		frame.data = Pong_Data {
+			payload = payload,
+		}
+
+		return frame, remaining_data, nil
+
+	case:
+		return Websocket_Fragment{}, remaining_data, Invalid_Opcode{opcode = opcode}
+	}
 }
 
 Get_Error :: union {
