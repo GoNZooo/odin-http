@@ -47,7 +47,8 @@ tasks:
       - odin build http-server -out:bin/http-server -o:none -debug
     sources:
       - ./http-server/**/*.odin
-      - ./http-client/**/*.odin
+      - ./http/**/*.odin
+      - ./tokenization/**/*.odin
     generates:
       - bin/http-server
     silent: true

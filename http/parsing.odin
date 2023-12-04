@@ -10,7 +10,7 @@ import "core:testing"
 
 import "../tokenization"
 
-MAX_HEADERS_LENGTH :: 32 * 1024
+MAX_HEADERS_LENGTH :: 64 * mem.Kilobyte
 
 Header_Parsing_Error :: union {
 	Headers_Too_Long,
@@ -115,7 +115,9 @@ parse_request :: proc(
 
 	m.method = GET{}
 	m.path = tokenization.tokenizer_read_string_until(&tokenizer, []string{" "}) or_return
+	tokenization.tokenizer_skip_any_of(&tokenizer, {tokenization.Space{}})
 	m.protocol = tokenization.tokenizer_read_string_until(&tokenizer, []string{"\r\n"}) or_return
+	tokenization.tokenizer_skip_string(&tokenizer, "\r\n") or_return
 	m.headers, _ = parse_headers(tokenizer.source[tokenizer.position:], allocator) or_return
 
 	return m, nil

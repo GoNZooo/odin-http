@@ -32,6 +32,8 @@ Token :: union {
 	Underscore,
 	Dash,
 	Slash,
+	QuestionMark,
+	ExclamationPoint,
 	Comment,
 	Upper_Symbol,
 	Lower_Symbol,
@@ -62,6 +64,8 @@ Dot :: struct {}
 Underscore :: struct {}
 Dash :: struct {}
 Slash :: struct {}
+QuestionMark :: struct {}
+ExclamationPoint :: struct {}
 Comment :: struct {}
 
 Upper_Symbol :: struct {
@@ -177,7 +181,7 @@ tokenizer_expect_exact :: proc(
 
 	if read_token.token != expectation {
 		return Source_Token{},
-			Expected_Token{
+			Expected_Token {
 				expected = expectation,
 				actual = read_token.token,
 				location = start_location,
@@ -206,7 +210,7 @@ tokenizer_expect :: proc(
 
 	if expectation_typeid != token_typeid {
 		return Source_Token{},
-			Expected_Token{
+			Expected_Token {
 				expected = expectation,
 				actual = read_token.token,
 				location = start_location,
@@ -264,7 +268,7 @@ tokenizer_skip_string :: proc(
 		rest_length := min(len(expected_string), len(source))
 
 		return(
-			Expected_String{
+			Expected_String {
 				expected = expected_string,
 				actual = source[:rest_length],
 				location = start_location,
@@ -308,7 +312,7 @@ tokenizer_next_token :: proc(
 	ok: bool,
 ) {
 	source_token = Source_Token {
-		location = Location{
+		location = Location {
 			position = tokenizer.position,
 			line = tokenizer.line,
 			column = tokenizer.column,
@@ -464,6 +468,16 @@ current :: proc(tokenizer: ^Tokenizer, modify: bool) -> (token: Token) {
 		tokenizer_copy.column += 1
 
 		return Slash{}
+	case '?':
+		tokenizer_copy.position += 1
+		tokenizer_copy.column += 1
+
+		return QuestionMark{}
+	case '!':
+		tokenizer_copy.position += 1
+		tokenizer_copy.column += 1
+
+		return ExclamationPoint{}
 	case '0' ..= '9':
 		float := read_float(&tokenizer_copy)
 		if float != nil {
@@ -697,7 +711,7 @@ test_tokenize_integer :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
 		token,
-		Source_Token{
+		Source_Token {
 			token = Integer{value = 123},
 			location = Location{position = 0, line = 1, column = 0},
 		},
@@ -715,7 +729,7 @@ test_tokenize_float :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
 		token,
-		Source_Token{
+		Source_Token {
 			token = Float{value = 42},
 			location = Location{position = 0, line = 1, column = 0},
 		},
@@ -733,7 +747,7 @@ test_read_double_quoted_string :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
 		token,
-		Source_Token{
+		Source_Token {
 			token = String{value = "hello"},
 			location = Location{position = 0, line = 1, column = 0},
 		},
@@ -753,7 +767,7 @@ test_read_single_quoted_string :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
 		token,
-		Source_Token{
+		Source_Token {
 			token = Single_Quoted_String{value = "hello"},
 			location = Location{position = 0, line = 1, column = 0},
 		},
@@ -769,36 +783,36 @@ test_read_symbols :: proc(t: ^testing.T) {
 	context.logger = log.create_console_logger()
 
 	tokenizer := tokenizer_create("()[]{}<>:,.")
-	expected_tokens := []Source_Token{
-		Source_Token{
+	expected_tokens := []Source_Token {
+		Source_Token {
 			token = Left_Parenthesis{},
 			location = Location{position = 0, line = 1, column = 0},
 		},
-		Source_Token{
+		Source_Token {
 			token = Right_Parenthesis{},
 			location = Location{position = 1, line = 1, column = 1},
 		},
-		Source_Token{
+		Source_Token {
 			token = Left_Square_Bracket{},
 			location = Location{position = 2, line = 1, column = 2},
 		},
-		Source_Token{
+		Source_Token {
 			token = Right_Square_Bracket{},
 			location = Location{position = 3, line = 1, column = 3},
 		},
-		Source_Token{
+		Source_Token {
 			token = Left_Curly_Brace{},
 			location = Location{position = 4, line = 1, column = 4},
 		},
-		Source_Token{
+		Source_Token {
 			token = Right_Curly_Brace{},
 			location = Location{position = 5, line = 1, column = 5},
 		},
-		Source_Token{
+		Source_Token {
 			token = Left_Angle_Bracket{},
 			location = Location{position = 6, line = 1, column = 6},
 		},
-		Source_Token{
+		Source_Token {
 			token = Right_Angle_Bracket{},
 			location = Location{position = 7, line = 1, column = 7},
 		},
@@ -819,16 +833,16 @@ test_read_char :: proc(t: ^testing.T) {
 	context.logger = log.create_console_logger()
 
 	tokenizer := tokenizer_create("$a$b$c")
-	expected_tokens := []Source_Token{
-		Source_Token{
+	expected_tokens := []Source_Token {
+		Source_Token {
 			token = Char{value = 'a'},
 			location = Location{position = 0, line = 1, column = 0},
 		},
-		Source_Token{
+		Source_Token {
 			token = Char{value = 'b'},
 			location = Location{position = 2, line = 1, column = 2},
 		},
-		Source_Token{
+		Source_Token {
 			token = Char{value = 'c'},
 			location = Location{position = 4, line = 1, column = 4},
 		},
@@ -846,14 +860,14 @@ test_read_boolean :: proc(t: ^testing.T) {
 	context.logger = log.create_console_logger()
 
 	tokenizer := tokenizer_create("true \nfalse")
-	expected_tokens := []Source_Token{
-		Source_Token{
+	expected_tokens := []Source_Token {
+		Source_Token {
 			token = Boolean{value = true},
 			location = Location{position = 0, line = 1, column = 0},
 		},
 		Source_Token{token = Space{}, location = Location{position = 4, line = 1, column = 4}},
 		Source_Token{token = Newline{}, location = Location{position = 5, line = 1, column = 5}},
-		Source_Token{
+		Source_Token {
 			token = Boolean{value = false},
 			location = Location{position = 6, line = 2, column = 0},
 		},
@@ -871,13 +885,13 @@ test_read_lower_symbol :: proc(t: ^testing.T) {
 	context.logger = log.create_console_logger()
 
 	tokenizer := tokenizer_create("hello there")
-	expected_tokens := []Source_Token{
-		Source_Token{
+	expected_tokens := []Source_Token {
+		Source_Token {
 			token = Lower_Symbol{value = "hello"},
 			location = Location{position = 0, line = 1, column = 0},
 		},
 		Source_Token{token = Space{}, location = Location{position = 5, line = 1, column = 5}},
-		Source_Token{
+		Source_Token {
 			token = Lower_Symbol{value = "there"},
 			location = Location{position = 6, line = 1, column = 6},
 		},
@@ -904,7 +918,7 @@ test_tokenizer_expect :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
 		read_token,
-		Source_Token{
+		Source_Token {
 			token = Lower_Symbol{value = "hello"},
 			location = Location{position = 0, line = 1, column = 0},
 		},
@@ -942,7 +956,7 @@ test_tokenizer_expect_exact :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
 		read_token,
-		Source_Token{
+		Source_Token {
 			token = Lower_Symbol{value = "hello"},
 			location = Location{position = 0, line = 1, column = 0},
 		},
