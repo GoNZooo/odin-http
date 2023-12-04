@@ -1,6 +1,7 @@
 package http_client
 
 import "core:bytes"
+import "core:crypto"
 import "core:encoding/base64"
 import "core:fmt"
 import "core:io"
@@ -48,44 +49,96 @@ main :: proc() {
 	fmt.printf("Response: %#v\n", response)
 
 	recv_buffer := make([]byte, 256 * mem.Megabyte)
-	bytes_received, recv_error := net.recv_tcp(socket, recv_buffer[:])
-	if recv_error != nil {
-		fmt.printf("Error when receiving: %v\n", recv_error)
+	fragment_serialization_buffer: [128 * mem.Kilobyte]byte
+	for {
+		log.debugf("receiving...")
+		bytes_received, recv_error := net.recv_tcp(socket, recv_buffer[:])
+		if recv_error != nil {
+			fmt.printf("Error when receiving: %v\n", recv_error)
 
-		os.exit(1)
+			os.exit(1)
+		}
+		log.debugf("bytes_received: %d\n", bytes_received)
+
+		frame, remaining_data, frame_parse_error := parse_websocket_fragment(recv_buffer[:])
+		if frame_parse_error != nil {
+			fmt.printf("Error when parsing frame: %v\n", frame_parse_error)
+
+			os.exit(1)
+		}
+
+		#partial switch f in frame.data {
+		case Ping_Data:
+			fmt.printf("Received ping, sending pong\n")
+			mask_key: [4]byte
+			crypto.rand_bytes(mask_key[:])
+
+			// log.debugf("first 4 bytes in payload: '%02x'", f.payload[:4])
+			// for &b in f.payload {
+			// 	b = 0
+			// }
+			// log.debugf("first 4 bytes in payload: '%02x'", f.payload[:4])
+			pong_fragment := Websocket_Fragment {
+				data = Pong_Data{payload = f.payload},
+				final = true,
+				mask = true,
+				mask_key = mask_key,
+			}
+			serialized_data, serialize_error := serialize_websocket_fragment(
+				fragment_serialization_buffer[:],
+				pong_fragment,
+			)
+			if serialize_error != nil {
+				fmt.printf("Error when sending pong: %v\n", serialize_error)
+
+				os.exit(1)
+			}
+
+			log.debugf("serialized_data: '%02x'", serialized_data)
+			sent_bytes, send_error := net.send_tcp(socket, serialized_data)
+			if send_error != nil {
+				fmt.printf("Error when sending pong: %v\n", send_error)
+
+				os.exit(1)
+			}
+			log.debugf("sent_bytes=%d", sent_bytes)
+			assert(
+				sent_bytes == len(serialized_data),
+				fmt.tprintf(
+					"sent_bytes: %d, len(serialized_data): %d\n",
+					sent_bytes,
+					len(serialized_data),
+				),
+			)
+		case:
+		// do nothing
+		}
+
+		log.debugf("len(remaining_data): %d\n", len(remaining_data))
+
+		fmt.printf("frame.final=%v\n", frame.final)
+		switch f in frame.data {
+		case Continuation_Data:
+			fmt.printf("Continuation frame payload length: %d\n", len(f.payload))
+		case Text_Data:
+			fmt.printf("Text frame payload length: %d\n", len(f.payload))
+		case Binary_Data:
+			fmt.printf("Binary frame payload length: %d\n", len(f.payload))
+		case Close_Data:
+			fmt.printf("Close frame payload: '%s'\n", f.payload)
+		case Ping_Data:
+			fmt.printf("Ping frame payload: '%s'\n", f.payload)
+		case Pong_Data:
+			fmt.printf("Pong frame payload: '%s'\n", f.payload)
+		}
 	}
-	log.debugf("bytes_received: %d\n", bytes_received)
-
-	frame, remaining_data, frame_parse_error := parse_websocket_fragment(recv_buffer[:])
-	if frame_parse_error != nil {
-		fmt.printf("Error when parsing frame: %v\n", frame_parse_error)
-
-		os.exit(1)
-	}
-
-	log.debugf("len(remaining_data): %d\n", len(remaining_data))
-
-	fmt.printf("frame.final=%v\n", frame.final)
-	switch f in frame.data {
-	case Continuation_Data:
-		fmt.printf("Continuation frame payload length: %d\n", len(f.payload))
-	case Text_Data:
-		fmt.printf("Text frame payload length: %d\n", len(f.payload))
-	case Binary_Data:
-		fmt.printf("Binary frame payload length: %d\n", len(f.payload))
-	case Close_Data:
-		fmt.printf("Close frame payload: '%s'\n", f.payload)
-	case Ping_Data:
-		fmt.printf("Ping frame payload: '%s'\n", f.payload)
-	case Pong_Data:
-		fmt.printf("Pong frame payload: '%s'\n", f.payload)
-	}
-
 }
 
 Websocket_Fragment :: struct {
-	data:  Websocket_Fragment_Data,
-	final: bool,
+	data:     Websocket_Fragment_Data,
+	final:    bool,
+	mask:     bool,
+	mask_key: [4]byte,
 }
 
 Websocket_Fragment_Data :: union {
@@ -179,6 +232,7 @@ parse_websocket_fragment :: proc(
 
 	payload := data[i:i + int(payload_length)]
 	remaining_data = data[i + int(payload_length):]
+	log.debugf("opcode: %02x", opcode)
 
 	switch opcode {
 	case 0x00:
@@ -288,4 +342,103 @@ get :: proc(
 	response = http.parse_response(recv_buffer[:bytes_received], allocator) or_return
 
 	return response, socket, nil
+}
+
+Serialize_Websocket_Fragment :: union {
+	net.Network_Error,
+	Buffer_Too_Small,
+}
+
+Buffer_Too_Small :: struct {
+	required_size: int,
+}
+
+serialize_websocket_fragment :: proc(
+	buffer: []byte,
+	fragment: Websocket_Fragment,
+) -> (
+	serialized_data: []byte,
+	error: Serialize_Websocket_Fragment,
+) {
+	i: int
+	buffer[i] = 0
+	if fragment.final {
+		buffer[i] = buffer[i] | 0x80 // 0b1000_0000
+	}
+
+	// we have no ext/reserved bits support, so don't set them
+
+	payload_length: u64
+	payload_data: []byte
+	switch t in fragment.data {
+	case Continuation_Data:
+		buffer[i] = buffer[i] & 0xf0
+		payload_length = u64(len(t.payload))
+		payload_data = t.payload
+	case Text_Data:
+		buffer[i] = buffer[i] | 0x01
+		payload_length = u64(len(t.payload))
+		payload_data = t.payload
+	case Binary_Data:
+		buffer[i] = buffer[i] | 0x02
+		payload_length = u64(len(t.payload))
+		payload_data = t.payload
+	case Close_Data:
+		buffer[i] = buffer[i] | 0x08
+		payload_length = u64(len(t.payload))
+		payload_data = t.payload
+	case Ping_Data:
+		buffer[i] = buffer[i] | 0x09
+		payload_length = u64(len(t.payload))
+		payload_data = t.payload
+	case Pong_Data:
+		buffer[i] = buffer[i] | 0x0a
+		payload_length = u64(len(t.payload))
+		payload_data = t.payload
+	}
+	i += 1
+
+	if fragment.mask {
+		buffer[i] = buffer[i] | 0x80 // 0b1000_0000
+	}
+
+	if payload_length > u64(len(buffer) - i) {
+		return nil, Buffer_Too_Small{required_size = int(payload_length) + i}
+	} else if payload_length > 65_535 {
+		buffer[i] = 127
+		i += 1
+
+		payload_length_bytes: [8]byte = transmute([8]byte)u64be(payload_length)
+		copy(buffer[i:], payload_length_bytes[:])
+		i += 8
+	} else if payload_length > 125 {
+		buffer[i] = 126
+		i += 1
+
+		payload_length_bytes: [2]byte = transmute([2]byte)u16be(payload_length)
+		copy(buffer[i:], payload_length_bytes[:])
+		i += 2
+	} else {
+		buffer[i] = buffer[i] | byte(payload_length)
+		i += 1
+	}
+
+	if fragment.mask {
+		key := fragment.mask_key
+		copy(buffer[i:], key[:])
+		i += 4
+	}
+
+	// mask our payload data (assumes that it is not pre-masked)
+	if fragment.mask {
+		key := fragment.mask_key
+		for j := u64(0); j < payload_length; j += 1 {
+			payload_data[j] = payload_data[j] ~ key[j % 4]
+		}
+	}
+
+	copy(buffer[i:], payload_data)
+	i += int(payload_length)
+
+	return buffer[:i], nil
 }
