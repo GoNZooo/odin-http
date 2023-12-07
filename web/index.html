@@ -1,0 +1,14 @@
+<!-- insert some html5 stuff here -->
+<html>
+<head>
+    <title>My First HTML5 Page</title>
+    <link rel="stylesheet" type="text/css" href="/static/web/style.css" />
+    <script src="https://unpkg.com/htmx.org@1.9.9"></script>
+</head>
+<body>
+    <h1>Example HTMX stuff</h1>
+    <button hx-get="/htmx/decrement" hx-target="#count">-</button>
+    <div id="count">N/A</div>
+    <button hx-get="/htmx/increment" hx-target="#count">+</button>
+</body>
+</html>

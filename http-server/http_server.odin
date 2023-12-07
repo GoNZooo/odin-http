@@ -9,9 +9,11 @@ import "core:mem"
 import "core:mem/virtual"
 import "core:net"
 import "core:os"
+import "core:path/filepath"
 import "core:strconv"
 import "core:strings"
 import "core:thread"
+import "core:time"
 
 import http "../http"
 
@@ -54,6 +56,12 @@ get_handler :: proc(handlers: [dynamic]Registered_Handler, request: http.Request
 	return nil
 }
 
+Filename :: distinct string
+
+ETag :: distinct i64
+
+cache := make(map[Filename]ETag)
+
 main :: proc() {
 	context.logger = log.create_console_logger()
 
@@ -87,6 +95,7 @@ main :: proc() {
 		os.exit(1)
 	}
 
+	// Routing
 	server: Server
 	server.handlers = make([dynamic]Registered_Handler, 0, 0)
 	server_register_handler(
@@ -98,6 +107,21 @@ main :: proc() {
 		&server,
 		proc(r: http.Request) -> bool {return r.path == "/ws"},
 		handle_websocket,
+	)
+	server_register_handler(
+		&server,
+		proc(r: http.Request) -> bool {return strings.has_prefix(r.path, "/static/")},
+		handle_static_file,
+	)
+	server_register_handler(
+		&server,
+		proc(r: http.Request) -> bool {return r.path == "/htmx/increment"},
+		handle_htmx_increment,
+	)
+	server_register_handler(
+		&server,
+		proc(r: http.Request) -> bool {return r.path == "/htmx/decrement"},
+		handle_htmx_decrement,
 	)
 
 	thread_pool: thread.Pool
@@ -349,6 +373,189 @@ handle_websocket :: proc(socket: net.TCP_Socket, request: http.Request, allocato
 		case http.Pong_Data:
 			log.debugf("Received pong data: '%s'", t.payload)
 		}
+	}
+}
+
+@(private = "file")
+file_mime_type :: proc(filename: string) -> string {
+	extension := filepath.long_ext(filename)
+	switch extension {
+	case ".html", ".htm":
+		return "text/html"
+	case ".txt":
+		return "text/plain"
+	case ".css":
+		return "text/css"
+	case ".js":
+		return "application/javascript"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".svg":
+		return "image/svg+xml"
+	case ".ico":
+		return "image/x-icon"
+	case ".woff":
+		return "font/woff"
+	case ".woff2":
+		return "font/woff2"
+	case ".ttf":
+		return "font/ttf"
+	case ".otf":
+		return "font/otf"
+	case ".odin":
+		return "text/plain"
+	case:
+		return "application/octet-stream"
+	}
+
+	return ""
+}
+
+handle_static_file :: proc(
+	socket: net.TCP_Socket,
+	request: http.Request,
+	allocator: mem.Allocator,
+) {
+	path, _ := strings.replace(request.path, "/static/", "", 1, allocator)
+	incoming_etag, has_incoming_etag := request.headers["ETag"]
+	incoming_if_none_match, has_incoming_if_none_match := request.headers["If-None-Match"]
+	if has_incoming_etag || has_incoming_if_none_match {
+		incoming_etag = has_incoming_etag ? incoming_etag : incoming_if_none_match
+		log.debugf("Incoming ETag: %s", incoming_etag)
+		etag, have_file_data := cache[Filename(path)]
+		if have_file_data && fmt.tprintf("%d", etag) == incoming_etag {
+			log.debugf("ETag matches, sending 304")
+			b: bytes.Buffer
+			bytes.buffer_write_string(&b, "HTTP/1.1 304 Not Modified\r\n")
+			bytes.buffer_write_string(&b, "Content-Type: text/html\r\n")
+			bytes.buffer_write_string(&b, "Content-Length: 0\r\n")
+			bytes.buffer_write_string(&b, "\r\n")
+			not_modified_message := bytes.buffer_to_bytes(&b)
+
+			bytes_sent := 0
+			for bytes_sent < len(not_modified_message) {
+				n, send_error := net.send_tcp(socket, not_modified_message)
+				if send_error != nil {
+					log.errorf("Failed to send data: %v", send_error)
+
+					break
+				}
+				bytes_sent += n
+			}
+
+			return
+		}
+	}
+
+	file_info, stat_error := os.stat(path, allocator)
+	if stat_error != os.ERROR_NONE {
+		log.warnf("Failed to stat file '%s': %v", path, stat_error)
+	}
+	mime_type := file_mime_type(path)
+	file_data, read_ok := os.read_entire_file_from_filename(path, allocator)
+	if !read_ok {
+		log.warnf("Failed to read file '%s'", path)
+
+		handle_404(socket, request, allocator)
+	}
+
+	b: bytes.Buffer
+	bytes.buffer_write_string(&b, "HTTP/1.1 200 OK\r\n")
+	bytes.buffer_write_string(&b, "Content-Type: ")
+	bytes.buffer_write_string(&b, mime_type)
+	bytes.buffer_write_string(&b, "\r\n")
+	bytes.buffer_write_string(&b, "Content-Length: ")
+	bytes.buffer_write_string(&b, fmt.tprintf("%d", len(file_data)))
+	bytes.buffer_write_string(&b, "\r\n")
+	bytes.buffer_write_string(&b, "ETag: ")
+	bytes.buffer_write_string(
+		&b,
+		fmt.tprintf("%d", time.time_to_unix(file_info.modification_time)),
+	)
+	bytes.buffer_write_string(&b, "\r\n")
+	bytes.buffer_write_string(&b, "\r\n")
+	bytes.buffer_write_string(&b, string(file_data))
+	content := bytes.buffer_to_bytes(&b)
+
+	bytes_sent := 0
+	for bytes_sent < len(content) {
+		n, send_error := net.send_tcp(socket, content[bytes_sent:])
+		if send_error != nil {
+			log.errorf("Failed to send data: %v", send_error)
+
+			break
+		}
+		bytes_sent += n
+	}
+
+	cache[Filename(path)] = ETag(time.time_to_unix(file_info.modification_time))
+}
+
+htmx_counter := 0
+
+handle_htmx_increment :: proc(
+	socket: net.TCP_Socket,
+	request: http.Request,
+	allocator: mem.Allocator,
+) {
+	htmx_counter += 1
+	counter_string := fmt.tprintf("%d", htmx_counter)
+	counter_string_length := len(counter_string)
+
+	b: bytes.Buffer
+	bytes.buffer_write_string(&b, "HTTP/1.1 200 OK\r\n")
+	bytes.buffer_write_string(&b, "Content-Type: text/html\r\n")
+	bytes.buffer_write_string(&b, "Content-Length: ")
+	bytes.buffer_write_string(&b, fmt.tprintf("%d", counter_string_length))
+	bytes.buffer_write_string(&b, "\r\n")
+	bytes.buffer_write_string(&b, "\r\n")
+	bytes.buffer_write_string(&b, counter_string)
+	increment_message := bytes.buffer_to_bytes(&b)
+
+	bytes_sent := 0
+	for bytes_sent < len(increment_message) {
+		n, send_error := net.send_tcp(socket, increment_message)
+		if send_error != nil {
+			log.errorf("Failed to send data: %v", send_error)
+
+			break
+		}
+		bytes_sent += n
+	}
+}
+
+handle_htmx_decrement :: proc(
+	socket: net.TCP_Socket,
+	request: http.Request,
+	allocator: mem.Allocator,
+) {
+	htmx_counter -= 1
+	counter_string := fmt.tprintf("%d", htmx_counter)
+	counter_string_length := len(counter_string)
+
+	b: bytes.Buffer
+	bytes.buffer_write_string(&b, "HTTP/1.1 200 OK\r\n")
+	bytes.buffer_write_string(&b, "Content-Type: text/html\r\n")
+	bytes.buffer_write_string(&b, "Content-Length: ")
+	bytes.buffer_write_string(&b, fmt.tprintf("%d", counter_string_length))
+	bytes.buffer_write_string(&b, "\r\n")
+	bytes.buffer_write_string(&b, "\r\n")
+	bytes.buffer_write_string(&b, counter_string)
+	decrement_message := bytes.buffer_to_bytes(&b)
+
+	bytes_sent := 0
+	for bytes_sent < len(decrement_message) {
+		n, send_error := net.send_tcp(socket, decrement_message)
+		if send_error != nil {
+			log.errorf("Failed to send data: %v", send_error)
+
+			break
+		}
+		bytes_sent += n
 	}
 }
 

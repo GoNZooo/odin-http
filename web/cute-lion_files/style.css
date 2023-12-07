@@ -1,0 +1,46 @@
+body {
+  color: azure;
+  background-color: #102020;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  text-align: justify;
+  font-size: 18px;
+}
+
+section.post {
+  text-align: center;
+  max-width: 50em;
+}
+section.post h2 {
+  text-align: left;
+}
+
+section#posts h2,
+section#posts h3 {
+  text-align: left;
+}
+
+section.post p {
+  text-justify: newspaper;
+  text-align: left;
+}
+
+img {
+  max-width: 100vw;
+}
+
+a {
+  color: lightslategray;
+}
+
+a:visited {
+  color: purple;
+}
+
+code {
+  background-color: #202020;
+  color: #d0d0d0;
+  font-family: "Lucida Console", "Courier New", Courier, monospace;
+  font-size: 15px;
+  margin-left: 0.2em;
+  margin-right: 0.2em;
+}
