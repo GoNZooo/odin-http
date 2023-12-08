@@ -64,6 +64,7 @@ tasks:
   test:
     cmds:
       - task: test-http-client
+      - task: test-tls
     aliases:
       - t
     method: none
@@ -78,6 +79,18 @@ tasks:
       - thc
     generates:
       - bin/test-http-client
+    method: none
+    silent: true
+
+  test-tls:
+    cmds:
+      - odin test tls -out:bin/test-tls
+    sources:
+      - ./tls/**/*.odin
+    aliases:
+      - tt
+    generates:
+      - bin/test-tls
     method: none
     silent: true
 
